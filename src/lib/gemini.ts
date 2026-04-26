@@ -1,14 +1,19 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(
-  import.meta.env.VITE_GEMINI_API_KEY
-);
 
 export async function getAIResponse(prompt: string) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    }
+  );
 
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-
-  return response.text();
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
 }
