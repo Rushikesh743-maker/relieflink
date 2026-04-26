@@ -1,3 +1,7 @@
+// 🔥 Firebase + Gemini
+import { db } from "@/lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getAIResponse } from "@/lib/gemini";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -33,6 +37,31 @@ const UserApp = () => {
     () => allRequests.filter((r) => myRequestIds.includes(r.id)).sort((a, b) => b.createdAt - a.createdAt),
     [allRequests, myRequestIds]
   );
+  // 🤖 AI state
+const [aiInput, setAiInput] = useState("");
+const [aiMessages, setAiMessages] = useState<{ role: "user" | "ai"; text: string }[]>([]);
+const [aiLoading, setAiLoading] = useState(false);
+
+// 🤖 AI handler
+const handleAI = async () => {
+  if (!aiInput.trim()) return;
+
+  const userMsg = aiInput;
+  setAiMessages((prev) => [...prev, { role: "user", text: userMsg }]);
+  setAiInput("");
+  setAiLoading(true);
+
+  try {
+    const reply = await getAIResponse(
+      `You are a disaster relief assistant. Give short, clear, practical help.\nUser: ${userMsg}`
+    );
+    setAiMessages((prev) => [...prev, { role: "ai", text: reply }]);
+  } catch (e) {
+    setAiMessages((prev) => [...prev, { role: "ai", text: "Error getting response" }]);
+  } finally {
+    setAiLoading(false);
+  }
+};
 
   // Flush offline queue when back online
   useEffect(() => {
@@ -55,7 +84,7 @@ const UserApp = () => {
     setLocating(true);
     const fallback = { lat: 28.6139 + (Math.random() - 0.5) * 0.04, lng: 77.209 + (Math.random() - 0.5) * 0.04 };
 
-    const finalize = (location: { lat: number; lng: number }) => {
+    const finalize =async(location: { lat: number; lng: number }) => {
       const payload = {
         type,
         priority: opts.priority ?? requestTypes.find((t) => t.value === type)!.priority,
@@ -73,16 +102,27 @@ const UserApp = () => {
         return;
       }
 
-      const created = reliefStore.addRequest(payload);
-      trackRequest(created.id);
+     const created = reliefStore.addRequest(payload);
+trackRequest(created.id);
+
+// 🔥 ALSO save to Firebase
+try {
+  await addDoc(collection(db, "requests"), {
+    ...payload,
+    createdAt: serverTimestamp(),
+    status: "pending",
+  });
+} catch (err) {
+  console.error("Firebase save error:", err);
+}
       toast.success("Request broadcast to nearby NGOs", { description: "You'll see live status updates below." });
       setLocating(false);
     };
 
     if (!navigator.geolocation) { finalize(fallback); return; }
     navigator.geolocation.getCurrentPosition(
-      (pos) => finalize({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => finalize(fallback),
+  async (pos) => await finalize({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+  async () => await finalize(fallback),
       { enableHighAccuracy: true, timeout: 5000 }
     );
   };
@@ -218,6 +258,38 @@ const UserApp = () => {
             )}
           </section>
         </div>
+        {/* 🤖 AI Assistant */}
+<section className="mt-16">
+  <div className="max-w-2xl mx-auto rounded-2xl border border-border/60 bg-card p-5 shadow-card">
+    <h2 className="font-display text-xl font-semibold mb-3">🤖 AI Assistant</h2>
+
+    <div className="h-60 overflow-y-auto border rounded-lg p-3 space-y-2 bg-background">
+      {aiMessages.map((msg, i) => (
+        <div
+          key={i}
+          className={`text-sm p-2 rounded-lg ${
+            msg.role === "user"
+              ? "bg-primary text-white ml-auto max-w-[70%]"
+              : "bg-muted max-w-[70%]"
+          }`}
+        >
+          {msg.text}
+        </div>
+      ))}
+      {aiLoading && <p className="text-xs text-muted-foreground">AI typing...</p>}
+    </div>
+
+    <div className="flex gap-2 mt-3">
+      <Input
+        value={aiInput}
+        onChange={(e) => setAiInput(e.target.value)}
+        placeholder="Ask for help (e.g., flood, injury...)"
+        onKeyDown={(e) => e.key === "Enter" && handleAI()}
+      />
+      <Button onClick={handleAI}>Ask</Button>
+    </div>
+  </div>
+</section>
       </main>
     </div>
   );
